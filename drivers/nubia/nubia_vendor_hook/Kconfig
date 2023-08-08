@@ -1,0 +1,12 @@
+
+config NUBIA_VENDOR_HOOK
+	tristate "NUBIA VENDOR HOOK"
+        default n
+	help
+	  Enable nubia vendor all vendor hook.
+
+config NUBIA_FREEZER
+	tristate "NUBIA FREEZER"
+        default n
+	help
+	  Enable nubia hook for freezer function.

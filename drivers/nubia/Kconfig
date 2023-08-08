@@ -1,0 +1,72 @@
+#
+# Nubia drivers configuration
+#
+
+#menuconfig NUBIA_DRIVERS
+menu "nubia drivers"
+
+config NUBIAFULLCONFIG
+	tristate "NUBIA FULL CONFIG"
+	default n
+	help
+	  Say Y here if you want to enable NUBIA FULL CONFIG
+	  If unsure, say N.
+
+comment "Nubia Full Config"
+
+config NUBIA_PROJECT
+	string "NUBIA PROJECT"
+	default "nubia_baseline"
+	help
+	  Say Y here if you want to enable NUBIA PROJECT
+	  If unsure, say N.
+
+comment "Nubia Project"
+
+config NUBIA_DRIVERS
+	tristate "NUBIA DRIVERS"
+	default n
+	help
+	  Say Y here if you want to enable NUBIA DRIVERS
+	  If unsure, say N.
+
+comment "Nubia Device Drivers"
+
+config NUBIA_SENSORS_SENS
+	bool "NUBIA_SENSORS_SENS"
+	default n
+	help
+	  Say Y here if you have enable NUBIA_SENSORS_SENS
+	  If unsure, say N.
+
+comment "Nubiai Sensors Sensitive"
+
+source "drivers/nubia/nubia_hw_version/Kconfig"
+source "drivers/nubia/nubia_vendor_hook/Kconfig"
+source "drivers/nubia/sensors_sensitivity/Kconfig"
+source "drivers/nubia/goodix_berlin_driver/Kconfig"
+source "drivers/nubia/fan/Kconfig"
+source "drivers/nubia/samsung/Kconfig"
+source "drivers/nubia/aw86927_double/Kconfig"
+
+if NUBIA_DRIVERS
+config NUBIA_FINGERPRINT
+        tristate "NUBIA_FINGERPRINT"
+        default n
+        help
+         Say Y here if you have enable NUBIA_FINGERPRINT
+         IF  unsure ,say N
+endif
+if NUBIA_FINGERPRINT
+source "drivers/nubia/fingerprint/Kconfig"
+endif
+source "drivers/nubia/aw96205/Kconfig"
+source "drivers/nubia/nubia_gpio_keys/Kconfig"
+#NUBIA LED START
+source "drivers/nubia/nubia_led/Kconfig"
+#NUBIA LED END
+
+source "drivers/nubia/nblog/Kconfig"
+source "drivers/nubia/nb_boost/Kconfig"
+endmenu
+

@@ -1,0 +1,65 @@
+&pm8550_gpios {
+    fan_pwm {
+        fan_pwm: fan_pwm {
+			pins = "gpio9";
+			function = "func1";
+			input-disable;
+			output-enable;
+			output-high;
+			qcom,drive-strength = <3>;
+			power-source = <0>;     /* 1.8V */
+			drive-push-pull;
+	    };
+    };
+};
+
+&tlmm {
+    fan_speed{
+        fan_speed: fan_speed {
+			mux {
+				pins = "gpio174";
+				function = "gpio";
+			};
+			config {
+				pins = "gpio174";
+				drive-strength = <16>;
+                                bias-pull-up;
+				input-enable;
+			};
+
+        };
+    
+    };
+};
+
+&pm_humu_l16 {
+    regulator-max-microvolt = <3312000>;
+};
+
+&spmi_bus {
+    qcom,pm8550@1 {
+        fan_pwm_dev: pwms@eb00 {
+            compatible = "qcom,pwm-lpg";
+            reg = <0xeb00>;
+            reg-names = "lpg-base";
+            #pwm-cells = <2>;
+            qcom,num-lpg-channels = <1>;
+        };
+
+        nb_fan: qcom,fan@ef00 {
+            compatible = "soc,fan";
+            reg = <0xef00>;
+            fan,avdd-supply = <&pm_humu_l16>;
+            regulator-names = "avdd";
+            pinctrl-names ="default";
+            pinctrl-0 =<&fan_speed &fan_pwm>;
+            fan,pwm-gpio = <&pm8550_gpios 9 GPIO_ACTIVE_HIGH>;
+            fan,speed-gpio = <&tlmm 174 GPIO_ACTIVE_HIGH>;
+            fan,voltage = <3312000>;
+            fan {
+                label = "fan";
+                pwms = <&fan_pwm_dev 0 1000000>;
+            };
+	    };
+    };	
+};

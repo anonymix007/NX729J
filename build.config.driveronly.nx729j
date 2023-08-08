@@ -1,0 +1,7 @@
+. ${ROOT_DIR}/msm-kernel/build.config.msm.kalama
+
+function merge_driveronly_diffconfig() {
+    apply_defconfig_fragment ${KERNEL_DIR}/arch/${ARCH}/configs/vendor/NX729J_driveronly.config vendor/${MSM_ARCH}-NX729J-driveronly_defconfig
+}
+
+merge_driveronly_diffconfig

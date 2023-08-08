@@ -1,0 +1,137 @@
+/*
+ * Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+&soc {
+       goodix_fp {
+                compatible = "goodix,fingerprint";
+                interrupt-parent = <&tlmm>;
+                pinctrl-names = "gf_fp_active", "gf_fp_suspend";
+                pinctrl-0 = <&goodix_pwr_avdd_active &goodix_reset_active &goodix_irq_active &goodix_id_active>;
+                pinctrl-1 = <&goodix_pwr_avdd_sleep &goodix_reset_sleep &goodix_irq_sleep &goodix_id_sleep>;
+                goodix,goodix_reset = <&tlmm 42 0x00>;
+                goodix,goodix_irq = <&tlmm 40 0x00>;
+                goodix,goodix_id = <&tlmm 41 0x00>;
+                goodix,goodix_pwr_avdd = <&tlmm 171 0x00>;
+                status = "ok";
+        };
+        /delete-node/ qcom,qbt_handler;
+};
+
+&tlmm {
+        goodix_pwr_avdd {
+                goodix_pwr_avdd_active: goodix_pwr_avdd_active {
+                        mux {
+                                pins = "gpio171";
+                                function = "gpio";
+                        };
+                        config {
+                                pins = "gpio171";
+                                drive-strength = <6>;
+                                bias-pull-up;
+                        };
+                };
+
+                goodix_pwr_avdd_sleep: goodix_pwr_avdd_sleep {
+                        mux {
+                                pins = "gpio171";
+                                function = "gpio";
+                        };
+                        config {
+                                pins = "gpio171";
+                                drive-strength = <6>;
+                                bias-pull-up;
+                        };
+                };
+        };
+
+        goodix_reset {
+                goodix_reset_active: goodix_reset_active {
+                        mux {
+                                pins = "gpio42";
+                                function = "gpio";
+                        };
+                        config {
+                                pins = "gpio42";
+                                drive-strength = <6>;
+                                bias-pull-up;
+                        };
+                };
+
+                goodix_reset_sleep: goodix_reset_sleep {
+                        mux {
+                                pins = "gpio42";
+                                function = "gpio";
+                        };
+                        config {
+                                pins = "gpio42";
+                                drive-strength = <6>;
+                                bias-pull-up;
+                        };
+                };
+        };
+
+        goodix_irq {
+                goodix_irq_active: goodix_irq_active {
+                        mux {
+                                pins = "gpio40";
+                                function = "gpio";
+                        };
+                        config {
+                                pins = "gpio40";
+                                drive-strength = <6>;
+                                bias-pull-down;
+                                input-enable;
+                        };
+                };
+
+                goodix_irq_sleep: goodix_irq_sleep {
+                        mux {
+                                pins = "gpio40";
+                                function = "gpio";
+                        };
+                        config {
+                                pins = "gpio40";
+                                drive-strength = <6>;
+                                bias-pull-down;
+                                input-enable;
+                        };
+                };
+        };
+
+        goodix_id {
+                goodix_id_active: goodix_id_active {
+                        mux {
+                                pins = "gpio41";
+                                function = "gpio";
+                        };
+                        config {
+                                pins = "gpio41";
+                                drive-strength = <6>;
+                                bias-pull-down;
+                                input-enable;
+                        };
+                };
+
+                goodix_id_sleep: goodix_id_sleep {
+                        mux {
+                                pins = "gpio41";
+                                function = "gpio";
+                        };
+                        config {
+                                pins = "gpio41";
+                                drive-strength = <6>;
+                                bias-pull-down;
+                                input-enable;
+                        };
+                };
+        };
+};

@@ -1,0 +1,17 @@
+/*
+ * nubia overwrite dts
+ */
+
+#include "driveronly.dtsi"
+#include "others.dtsi"
+//#include "haptic.dtsi"
+//#include "sensors.dtsi"
+//#include "fan.dtsi"
+#include "aw22xxx.dtsi"
+#include "nfc.dtsi"
+#include "soc_fan.dtsi"
+//#include "usb.dtsi"
+#include "pa.dtsi"
+#include "finger.dtsi"
+#include "vibrator_double.dtsi"
+#include NUBIA_DRIVER_DEBUGPOLICY_DTSI_FILE

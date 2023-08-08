@@ -1,0 +1,24 @@
+#
+# nubia led driver configuration
+#
+
+config NUBIG_HAPTIC_GKI
+    bool "Haptic driver for awinic aw8697 for gki"
+    default n
+    help
+      nubia aw8697 for GKI test.
+
+menuconfig NUBIA_LED
+	tristate "nubia led driver"
+	default n
+	help
+	  Say Y here if you have a nubia led connected
+	  to your system.
+
+	  If unsure, say N.
+
+if NUBIA_LED
+
+source "drivers/nubia/nubia_led/aw22xxx/Kconfig"
+endif
+

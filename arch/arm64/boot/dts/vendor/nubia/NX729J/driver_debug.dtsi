@@ -1,0 +1,5 @@
+&soc {
+    pmic-pon-log {
+        qcom,pmic-fault-panic;
+    };
+};

@@ -1,0 +1,16 @@
+&soc {
+	/delete-node/ qcom,qbt_handler;
+	qcom,spcom {
+		status = "disabled";
+	};
+};
+
+&spss_pas {
+	status = "disabled";
+};
+
+&spss_utils {
+	status = "disabled";
+};
+
+#include NUBIA_PLATFORM_DEBUGPOLICY_DTSI_FILE
