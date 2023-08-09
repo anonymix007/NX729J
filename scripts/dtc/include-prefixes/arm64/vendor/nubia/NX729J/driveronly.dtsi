@@ -1,6 +1,0 @@
-/*
- * nubia driveronly dts
- */
- 
-#include "tp.dtsi"
-#include "aw.dtsi"

@@ -55,8 +55,8 @@ enum NUBIA_MODULE_NAME{
 };
 
 static const char * const nubia_module_type_text[] = {
-	"kernel_charge", "kernel_touch_panel", "kernel_display_lcd", "kernel_display_dp", 
-	"kernel_light_sensor", "Unknown", 
+	"kernel_charge", "kernel_touch_panel", "kernel_display_lcd", "kernel_display_dp",
+	"kernel_light_sensor", "Unknown",
 };
 
 struct nubia_log_key_value{
@@ -81,7 +81,7 @@ struct nubia_log_system{
 	//struct nubia_log_module *log_module;
 	char *kdata;
 	struct mutex log_lock;
-	
+
 };
 
 ssize_t log_system_report_log(enum NUBIA_MODULE_NAME module, char *key, char *argv, uint32_t value);

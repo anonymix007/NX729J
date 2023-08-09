@@ -168,10 +168,3 @@ arch/*/boot/dts/vendor
 
 # Documentation toolchain
 sphinx_*/
-
-# nubia driver
-drivers/nubia
-arch/arm64/configs/vendor/nubia
-arch/arm64/configs/vendor/NX729J_diff.config
-arch/arm64/configs/vendor/NX729J-perf_diff.config
-arch/arm64/configs/vendor/NX729J_driveronly.config
