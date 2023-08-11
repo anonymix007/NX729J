@@ -1,0 +1,19 @@
+#
+# Fan driver configuration
+#
+menuconfig NUBIA_FAN
+	bool "Fan"
+	default n
+	help
+	  Say Y here if you have a Fan connected
+	  to your system.
+
+config SOC_FAN
+        tristate "Soc Fan"
+        default n
+       help
+          Say Y here if you use soc control fan.
+
+#config FAN_UPDATA
+#	bool "Fan updata"
+#	default n

@@ -227,6 +227,37 @@ dtc_cpp_flags  = -Wp,-MMD,$(depfile).pre.tmp -nostdinc                    \
 		 $(addprefix -I,$(DTC_INCLUDE))                          \
 		 -undef -D__DTS__
 
+#nubia: Set nubia overwrite dtsi file
+ifneq (,$(filter "NX729J", $(CONFIG_NUBIA_PROJECT)))
+ifneq ($(CONFIG_NUBIAFULLCONFIG),y)
+dtc_cpp_flags += -DNUBIA_OVERWRITE_DTSI_FILE=\"../nubia/$(CONFIG_NUBIA_PROJECT)/driveronly.dtsi\"
+dtc_cpp_flags += -DNUBIA_OVERWRITE_DTB_DTSI_FILE=\"../nubia/$(CONFIG_NUBIA_PROJECT)/empty.dtsi\"
+dtc_cpp_flags += -DNUBIA_CAMERA_OVERWRITE_DTSI_FILE=\"$(ROOT_DIR)/../vendor/qcom/proprietary/nubia-devicetree/$(CONFIG_NUBIA_PROJECT)/empty.dtsi\"
+dtc_cpp_flags += -DNUBIA_AUDIO_OVERWRITE_DTSI_FILE=\"$(ROOT_DIR)/../vendor/qcom/proprietary/nubia-devicetree/$(CONFIG_NUBIA_PROJECT)/empty.dtsi\"
+dtc_cpp_flags += -DNUBIA_DISPLAY_OVERWRITE_DTSI_FILE=\"$(ROOT_DIR)/../vendor/qcom/proprietary/nubia-devicetree/$(CONFIG_NUBIA_PROJECT)/display.dtsi\"
+else
+dtc_cpp_flags += -DNUBIA_OVERWRITE_DTSI_FILE=\"../nubia/$(CONFIG_NUBIA_PROJECT)/head.dtsi\"
+dtc_cpp_flags += -DNUBIA_OVERWRITE_DTB_DTSI_FILE=\"../nubia/$(CONFIG_NUBIA_PROJECT)/platform.dtsi\"
+dtc_cpp_flags += -DNUBIA_CAMERA_OVERWRITE_DTSI_FILE=\"$(ROOT_DIR)/../vendor/qcom/proprietary/nubia-devicetree/$(CONFIG_NUBIA_PROJECT)/camera.dtsi\"
+dtc_cpp_flags += -DNUBIA_AUDIO_OVERWRITE_DTSI_FILE=\"$(ROOT_DIR)/../vendor/qcom/proprietary/nubia-devicetree/$(CONFIG_NUBIA_PROJECT)/audio.dtsi\"
+dtc_cpp_flags += -DNUBIA_DISPLAY_OVERWRITE_DTSI_FILE=\"$(ROOT_DIR)/../vendor/qcom/proprietary/nubia-devicetree/$(CONFIG_NUBIA_PROJECT)/display.dtsi\"
+endif
+else
+dtc_cpp_flags += -DNUBIA_OVERWRITE_DTSI_FILE=\"../nubia/$(CONFIG_NUBIA_PROJECT)/empty.dtsi\"
+dtc_cpp_flags += -DNUBIA_OVERWRITE_DTB_DTSI_FILE=\"../nubia/$(CONFIG_NUBIA_PROJECT)/empty.dtsi\"
+dtc_cpp_flags += -DNUBIA_CAMERA_OVERWRITE_DTSI_FILE=\"$(ROOT_DIR)/../vendor/qcom/proprietary/nubia-devicetree/$(CONFIG_NUBIA_PROJECT)/empty.dtsi\"
+dtc_cpp_flags += -DNUBIA_AUDIO_OVERWRITE_DTSI_FILE=\"$(ROOT_DIR)/../vendor/qcom/proprietary/nubia-devicetree/$(CONFIG_NUBIA_PROJECT)/empty.dtsi\"
+dtc_cpp_flags += -DNUBIA_DISPLAY_OVERWRITE_DTSI_FILE=\"$(ROOT_DIR)/../vendor/qcom/proprietary/nubia-devicetree/$(CONFIG_NUBIA_PROJECT)/empty.dtsi\"
+endif
+
+ifeq ($(NUBIA_KERNEL_DP), 1)
+dtc_cpp_flags += -DNUBIA_DRIVER_DEBUGPOLICY_DTSI_FILE=\"driver_debug.dtsi\"
+dtc_cpp_flags += -DNUBIA_PLATFORM_DEBUGPOLICY_DTSI_FILE=\"platform_debug.dtsi\"
+else
+dtc_cpp_flags += -DNUBIA_DRIVER_DEBUGPOLICY_DTSI_FILE=\"empty.dtsi\"
+dtc_cpp_flags += -DNUBIA_PLATFORM_DEBUGPOLICY_DTSI_FILE=\"empty.dtsi\"
+endif
+
 ifeq ($(CONFIG_LTO_CLANG),y)
 # With CONFIG_LTO_CLANG, .o files in modules might be LLVM bitcode, so we
 # need to run LTO to compile them into native code (.lto.o) before further

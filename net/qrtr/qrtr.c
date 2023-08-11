@@ -374,7 +374,7 @@ void qrtr_print_wakeup_reason(const void *data)
 	size = (sizeof(preview) > size) ? size : sizeof(preview);
 	memcpy(&preview, data + hdrlen, size);
 
-	pr_info("%s: src[0x%x:0x%x] dst[0x%x:0x%x] [%08x %08x] service[0x%x]\n",
+	pr_info("pmdb %s: src[0x%x:0x%x] dst[0x%x:0x%x] [%08x %08x] service[0x%x]\n",
 		__func__,
 		cb.src_node, cb.src_port,
 		cb.dst_node, cb.dst_port,

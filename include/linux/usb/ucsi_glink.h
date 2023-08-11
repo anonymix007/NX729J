@@ -9,6 +9,10 @@
 #include <linux/errno.h>
 #include <linux/usb/typec.h>
 
+#ifdef CONFIG_NUBIA_USB_CONFIG
+u32 nubia_global_cc_orientation = 0x0;
+#endif
+
 struct ucsi_glink_constat_info {
 	enum typec_accessory acc;
 };

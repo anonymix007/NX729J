@@ -1,0 +1,3 @@
+. ${ROOT_DIR}/msm-kernel/build.config.nubia.nx729j
+
+NUBIA_KERNEL_DP=1

@@ -77,6 +77,141 @@ struct qrtr_node {
 	struct xarray servers;
 };
 
+//nubia b
+#define DIAG_SERVICE 4097
+
+static const struct {
+	unsigned int service;
+	unsigned int ifilter;
+	const char *name;
+} common_names[] = {
+	{ 0, 0, "Control service" },
+	{ 1, 0, "Wireless Data Service" },
+	{ 2, 0, "Device Management Service" },
+	{ 3, 0, "Network Access Service" },
+	{ 4, 0, "Quality Of Service service" },
+	{ 5, 0, "Wireless Messaging Service" },
+	{ 6, 0, "Position Determination Service" },
+	{ 7, 0, "Authentication service" },
+	{ 8, 0, "AT service" },
+	{ 9, 0, "Voice service" },
+	{ 10, 0, "Card Application Toolkit service (v2)" },
+	{ 11, 0, "User Identity Module service" },
+	{ 12, 0, "Phonebook Management service" },
+	{ 13, 0, "QCHAT service" },
+	{ 14, 0, "Remote file system service" },
+	{ 15, 0, "Test service" },
+	{ 16, 0, "Location service (~ PDS v2)" },
+	{ 17, 0, "Specific absorption rate service" },
+	{ 18, 0, "IMS settings service" },
+	{ 19, 0, "Analog to digital converter driver service" },
+	{ 20, 0, "Core sound driver service" },
+	{ 21, 0, "Modem embedded file system service" },
+	{ 22, 0, "Time service" },
+	{ 23, 0, "Thermal sensors service" },
+	{ 24, 0, "Thermal mitigation device service" },
+	{ 25, 0, "Service access proxy service" },
+	{ 26, 0, "Wireless data administrative service" },
+	{ 27, 0, "TSYNC control service" },
+	{ 28, 0, "Remote file system access service" },
+	{ 29, 0, "Circuit switched videotelephony service" },
+	{ 30, 0, "QTI mobile access point service" },
+	{ 31, 0, "IMS presence service" },
+	{ 32, 0, "IMS videotelephony service" },
+	{ 33, 0, "IMS application service" },
+	{ 34, 0, "Coexistence service" },
+	{ 36, 0, "Persistent device configuration service" },
+	{ 38, 0, "Simultaneous transmit service" },
+	{ 39, 0, "Bearer independent transport service" },
+	{ 40, 0, "IMS RTP service" },
+	{ 41, 0, "RF radiated performance enhancement service" },
+	{ 42, 0, "Data system determination service" },
+	{ 43, 0, "Subsystem control service" },
+	{ 49, 0, "IPA control service" },
+	{ 51, 0, "CoreSight remote tracing service" },
+	{ 52, 0, "Dynamic Heap Memory Sharing" },
+	{ 64, 0, "Service registry locator service" },
+	{ 66, 0, "Service registry notification service" },
+	{ 69, 0, "ATH10k WLAN firmware service" },
+	{ 224, 0, "Card Application Toolkit service (v1)" },
+	{ 225, 0, "Remote Management Service" },
+	{ 226, 0, "Open Mobile Alliance device management service" },
+	{ 312, 0, "QBT1000 Ultrasonic Fingerprint Sensor service" },
+	{ 769, 0, "SLIMbus control service" },
+	{ 771, 0, "Peripheral Access Control Manager service" },
+	{ DIAG_SERVICE, 0, "DIAG service" },
+};
+static const char *diag_instance_base_str(unsigned int instance_base)
+{
+	switch (instance_base) {
+		case 0: return "MODEM";
+		case 1: return "LPASS";
+		case 2: return "WCNSS";
+		case 3: return "SENSORS";
+		case 4: return "CDSP";
+		case 5: return "WDSP";
+		default: return "<unk>";
+	}
+}
+
+static const char *diag_instance_str(unsigned int instance)
+{
+	switch (instance) {
+		case 0: return "CNTL";
+		case 1: return "CMD";
+		case 2: return "DATA";
+		case 3: return "DCI_CMD";
+		case 4: return "DCI";
+		default: return "<unk>";
+	}
+}
+static const char *subsys_str(unsigned int node)
+{
+	switch (node) {
+		case 0: return "MPSS";
+		case 1: return "APPS";
+		case 5: return "ADSP";
+		case 7: return "WCNSS";
+		case 9: return "SLPI";
+		case 10: return "CDSP";
+		case 11: return "NPU";
+		default: return "NULL";
+	}
+}
+
+static int get_diag_instance_info(char *str, size_t size, unsigned int instance)
+{
+	return snprintf(str, size, "%s:%s",
+			diag_instance_base_str(instance >> 6),
+			diag_instance_str(instance & 0x3f));
+}
+static void log_server_info(struct qrtr_server *srv){
+	int i=0;
+	const char *name = NULL;
+	char buf[24];
+
+	for (i = 0; i < sizeof(common_names)/sizeof(common_names[0]); ++i) {
+			if (srv->service != common_names[i].service)
+				continue;
+			if (srv->instance &&
+			   (srv->instance & common_names[i].ifilter) != common_names[i].ifilter)
+				continue;
+			name = common_names[i].name;
+	}
+	if (!name)
+	  name = "<unknown>";
+
+	if (srv->service == DIAG_SERVICE) {
+		get_diag_instance_info(buf, sizeof(buf), srv->instance);
+		pr_info("pmdb:s=0x%x 0x%x,n=%s 0x%x p=0x%x %s (%s)\n",
+			srv->service, srv->instance, subsys_str(srv->node),srv->node, srv->port, name, buf);
+	} else {
+		pr_info("pmdb:s=0x%x 0x%x,n=%s 0x%x p=0x%x %s\n",
+			srv->service, srv->instance, subsys_str(srv->node),srv->node, srv->port, name);
+	}
+}
+//nubia e
+
 static struct qrtr_node *node_get(unsigned int node_id)
 {
 	struct qrtr_node *node;
@@ -145,6 +280,13 @@ static int service_announce_new(struct sockaddr_qrtr *dest,
 
 	NS_INFO("%s: [0x%x:0x%x]@[0x%x:0x%x]\n", __func__, srv->service,
 		srv->instance, srv->node, srv->port);
+
+	//nubia b
+	if (srv->node != qrtr_ns.local_node){
+	   log_server_info(srv);
+	}
+    //nubia e
+
 	iv.iov_base = &pkt;
 	iv.iov_len = sizeof(pkt);
 
@@ -174,6 +316,10 @@ static int service_announce_del(struct sockaddr_qrtr *dest,
 
 	NS_INFO("%s: [0x%x:0x%x]@[0x%x:0x%x]\n", __func__, srv->service,
 		srv->instance, srv->node, srv->port);
+	//nubia b
+	pr_info("pmdb qrtrtable del: [0x%x:0x%x]@[0x%x:0x%x]\n",  srv->service,
+		srv->instance, srv->node, srv->port);
+	//nubia e
 
 	iv.iov_base = &pkt;
 	iv.iov_len = sizeof(pkt);
@@ -295,6 +441,9 @@ static struct qrtr_server *server_add(unsigned int service,
 
 	NS_INFO("%s: [0x%x:0x%x]@[0x%x:0x%x]\n", __func__, srv->service,
 		srv->instance, srv->node, srv->port);
+	//nubia b
+	log_server_info(srv);
+    //nubia e
 
 	return srv;
 

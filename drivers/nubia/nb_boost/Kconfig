@@ -1,0 +1,9 @@
+#
+# nubia task boost driver configuration
+#
+
+config NUBIA_BOOST_TASK
+        tristate "Nubia boost task"
+        default n
+        help
+          add nubia boost task

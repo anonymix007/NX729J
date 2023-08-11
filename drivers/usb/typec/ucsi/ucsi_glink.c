@@ -17,6 +17,7 @@
 #include <linux/soc/qcom/pmic_glink.h>
 #include <linux/usb/typec.h>
 #include <linux/usb/ucsi_glink.h>
+#include <linux/usb/nubia_usb_debug.h>
 
 #include "ucsi.h"
 
@@ -41,6 +42,13 @@
 		ipc_log_string(ucsi_ipc_log, fmt, ##__VA_ARGS__); \
 		pr_debug(fmt, ##__VA_ARGS__); \
 	} while (0)
+
+#ifdef CONFIG_NUBIA_USB_CONFIG
+#define ORIENTATION_CC1 0x01
+#define ORIENTATION_CC2 0x02
+struct kobject *enhance_kobj = NULL;
+EXPORT_SYMBOL(enhance_kobj);
+#endif
 
 struct ucsi_read_buf_req_msg {
 	struct pmic_glink_hdr	hdr;
@@ -249,6 +257,8 @@ static int handle_ucsi_notify(struct ucsi_dev *udev, void *data, size_t len)
 
 	msg_ptr = data;
 	cci = msg_ptr->notification;
+	nubia_global_cc_orientation = msg_ptr->receiver;
+	NUBIA_USB_INFO("receiver the data form adsp cc_orientation = %02x.\n", nubia_global_cc_orientation);
 	ucsi_log("notify:", UCSI_CCI, (u8 *)&cci, sizeof(cci));
 
 	if (test_bit(CMD_PENDING, &udev->flags) &&
@@ -607,17 +617,49 @@ static void ucsi_qti_state_cb(void *priv, enum pmic_glink_state state)
 	mutex_unlock(&udev->state_lock);
 }
 
+#ifdef CONFIG_NUBIA_USB_CONFIG
+static ssize_t cc_orientation_show(struct kobject *kobj,
+                struct kobj_attribute *attr, char *buf)
+{
+        if (nubia_global_cc_orientation == ORIENTATION_CC1)
+                return scnprintf(buf, PAGE_SIZE, "CC1\n");
+        if (nubia_global_cc_orientation == ORIENTATION_CC2)
+                return scnprintf(buf, PAGE_SIZE, "CC2\n");
+        return scnprintf(buf, PAGE_SIZE, "none\n");
+}
+
+static ssize_t otg30_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	return 0;
+}
+
+static ssize_t otg30_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t size)
+{
+	return size;
+}
+
+static struct kobj_attribute usb_test_attrs[] = {
+	__ATTR(cc_orientation, 0664, cc_orientation_show, NULL),
+	__ATTR(otg30, 0664, otg30_show, otg30_store),
+};
+#endif
+
 static int ucsi_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct pmic_glink_client_data client_data;
 	struct ucsi_dev *udev;
 	int rc;
+	int ret;
+#ifdef CONFIG_NUBIA_USB_CONFIG
+	int attr_count;
+#endif
 
 	udev = devm_kzalloc(dev, sizeof(*udev), GFP_KERNEL);
 	if (!udev)
 		return -ENOMEM;
-
 	INIT_LIST_HEAD(&udev->constat_info_list);
 	INIT_WORK(&udev->notify_work, ucsi_qti_notify_work);
 	INIT_WORK(&udev->setup_work, ucsi_qti_setup_work);
@@ -648,7 +690,6 @@ static int ucsi_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, udev);
 	udev->dev = dev;
-
 	ucsi_ipc_log = ipc_log_context_create(NUM_LOG_PAGES, "ucsi", 0);
 	if (!ucsi_ipc_log)
 		dev_warn(dev, "Error in creating ipc_log_context\n");
@@ -659,6 +700,20 @@ static int ucsi_probe(struct platform_device *pdev)
 		ucsi_ipc_log = NULL;
 		pmic_glink_unregister_client(udev->client);
 	}
+
+#ifdef CONFIG_NUBIA_USB_CONFIG
+	if (enhance_kobj == NULL) {
+		pr_err("nubia enhance_kobj init in %s\n", __func__);
+		enhance_kobj = kobject_create_and_add("usb_enhance", kernel_kobj);
+		if (!enhance_kobj)
+			pr_err("nubia enhance_kobj creat failed in %s\n", __func__);
+	}
+	for (attr_count = 0; attr_count < ARRAY_SIZE(usb_test_attrs); attr_count++) {
+		ret = sysfs_create_file(enhance_kobj, &usb_test_attrs[attr_count].attr);
+		if (ret)
+			pr_err("nubia create_file filed in %s\n", __func__);
+	}
+#endif
 
 	return rc;
 }

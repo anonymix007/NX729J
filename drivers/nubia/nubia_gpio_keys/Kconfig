@@ -1,0 +1,10 @@
+#
+# nubia gpio keys driver configuration
+#
+
+config NUBIA_KEYBOARD_GAMESWITCH
+        tristate "Keypad NUBIA GameSwitchkey"
+        depends on KEYBOARD_GPIO
+        default n
+        help
+          Addr GameSwitchkey attr

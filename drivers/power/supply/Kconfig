@@ -442,6 +442,13 @@ config QTI_BATTERY_CHARGER
 	  To compile the driver as a module, choose M here: the module will be
 	  called qti_battery_charger.
 
+config FEATURE_NUBIA_BATTERY_2S
+	tristate "distinguish 2S"
+	depends on QTI_PMIC_GLINK
+	default m
+	help
+	  this micro to distinguish 1s and 2s battery
+
 config CHARGER_88PM860X
 	tristate "Marvell 88PM860x Charger driver"
 	depends on MFD_88PM860X && BATTERY_88PM860X

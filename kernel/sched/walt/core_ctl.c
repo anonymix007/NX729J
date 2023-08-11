@@ -422,6 +422,30 @@ static ssize_t show_not_preferred(const struct cluster_data *state, char *buf)
 	return count;
 }
 
+//nubia add for nubia cpu actives
+static ssize_t show_nubia_active_cpus(const struct cluster_data *state, char *buf)
+{
+    struct cpu_data *c;
+    struct cluster_data *cluster;
+    ssize_t count = 0;
+    unsigned int cpu;
+
+    spin_lock_irq(&state_lock);
+    for_each_possible_cpu(cpu) {
+        c = &per_cpu(cpu_state, cpu);
+        cluster = c->cluster;
+        if (!cluster || !cluster->inited)
+            continue;
+        count += scnprintf(buf + count, PAGE_SIZE - count,
+                    "%d:%u ",
+                    c->cpu, !cpu_halted(c->cpu));
+    }
+    spin_unlock_irq(&state_lock);
+    count += scnprintf(buf + count, PAGE_SIZE - count,"\n");
+    return count;
+}
+//nubia add end
+
 struct core_ctl_attr {
 	struct attribute	attr;
 	ssize_t			(*show)(const struct cluster_data *cd, char *c);
@@ -449,6 +473,9 @@ core_ctl_attr_ro(active_cpus);
 core_ctl_attr_ro(global_state);
 core_ctl_attr_rw(not_preferred);
 core_ctl_attr_rw(enable);
+//nubia add for nubia cpu actives
+core_ctl_attr_ro(nubia_active_cpus);
+//nubia end
 
 static struct attribute *default_attrs[] = {
 	&min_cpus.attr,
@@ -463,6 +490,9 @@ static struct attribute *default_attrs[] = {
 	&active_cpus.attr,
 	&global_state.attr,
 	&not_preferred.attr,
+    //nubia add for nubia cpu actives
+    &nubia_active_cpus.attr,
+    //nubia end
 	NULL
 };
 

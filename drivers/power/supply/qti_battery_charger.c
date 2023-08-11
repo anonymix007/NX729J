@@ -21,7 +21,18 @@
 #include <linux/reboot.h>
 #include <linux/soc/qcom/pmic_glink.h>
 #include <linux/soc/qcom/battery_charger.h>
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+#include <linux/gpio.h>
+#include <linux/of_gpio.h>
+//#include <linux/msm_drm_notify.h>
+#include <linux/notifier.h>
+#include <linux/fb.h>
+#endif
 #include <linux/soc/qcom/panel_event_notifier.h>
+#ifdef CONFIG_NBLOG
+#include "nblog/nblog.h"
+#include "nblog_charge_info.h"
+#endif /* CONFIG_NBLOG */
 
 #define MSG_OWNER_BC			32778
 #define MSG_TYPE_REQ_RESP		1
@@ -46,6 +57,18 @@
 #define BC_SHUTDOWN_NOTIFY		0x47
 #define BC_HBOOST_VMAX_CLAMP_NOTIFY	0x79
 #define BC_GENERIC_NOTIFY		0x80
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+#define BC_NUBIA_SET_CHARGER   0x60
+#define BC_NUBIA_SET_CHARGER_LCD   0x61
+#define BC_NUBIA_SET_CHARGER_MODE   0x62
+#define BC_NUBIA_CHARGER_GET_VDM	0x70
+#define	BC_NUBIA_CHARGER_GET_FLOAT_CAPACITY	0x71
+struct battery_chg_dev *nubia_charge_bcdev = NULL;
+u16 charge_bypass_flag;
+u16 charge_mode_flag;
+struct kobject * charge_kobj;
+bool lcdstate_val = TRUE;
+#endif
 
 /* Generic definitions */
 #define MAX_STR_LEN			128
@@ -55,6 +78,26 @@
 #define WLS_FW_UPDATE_TIME_MS		1000
 #define WLS_FW_BUF_SIZE			128
 #define DEFAULT_RESTRICT_FCC_UA		1000000
+
+#ifdef CONFIG_NBLOG
+struct _power_supply_nblog_info{
+	int battery_soc;
+	int battery_voltage;
+	int battery_tempature;
+	int battery_health;
+	int charger_state;
+	int charger_current;
+	int full_charge;
+	int battery_cycles_count;
+	int battery_counter;
+	int battery_full_design;
+	int battery_full;
+	int charger_type;
+};
+
+struct _power_supply_nblog_info power_supply_nblog_info;
+char *power_noblog_buf;
+#endif /* CONFIG_NBLOG */
 
 enum psy_type {
 	PSY_TYPE_BATTERY,
@@ -94,6 +137,9 @@ enum battery_property_id {
 	BATT_RESISTANCE,
 	BATT_POWER_NOW,
 	BATT_POWER_AVG,
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+	BATT_TTF_NOW,
+#endif
 	BATT_PROP_MAX,
 };
 
@@ -205,6 +251,22 @@ struct wireless_fw_get_version_resp {
 	u32			fw_version;
 };
 
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+struct vdm_get_flg_rep {
+	struct pmic_glink_hdr	hdr;
+};
+
+struct vdm_get_flg_resp {
+	struct pmic_glink_hdr	hdr;
+	u32			vdm_flag;
+};
+
+struct battery_get_float_capacity_resp {
+	struct pmic_glink_hdr	hdr;
+	u16			float_capacity;
+};
+
+#endif
 struct battery_charger_ship_mode_req_msg {
 	struct pmic_glink_hdr	hdr;
 	u32			ship_mode_type;
@@ -258,6 +320,23 @@ struct battery_chg_dev {
 	bool				restrict_chg_en;
 	/* To track the driver initialization status */
 	bool				initialized;
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+	u16				board_type_gpio;
+	u16 			board_type;
+	u16				float_capacity;
+	u16				two_batt_float_capacity;
+	struct delayed_work	soc_flush_work;
+	struct work_struct              lcdstate_check_work;
+	struct workqueue_struct         *soc_flush_workqueue;
+	struct notifier_block 	fb_notifier;
+	int				lcd_on;
+	u16				bypass_charge;
+	u16				charger_mode;
+	u16				lcdstatus_charge;
+	u32				charger_vdm_flag;
+	struct pinctrl_state            *pinctrl_state;
+	struct pinctrl                  *pinctrl;
+#endif
 	bool				notify_en;
 	bool				error_prop;
 };
@@ -285,6 +364,9 @@ static const int battery_prop_map[BATT_PROP_MAX] = {
 	[BATT_TTE_AVG]		= POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG,
 	[BATT_POWER_NOW]	= POWER_SUPPLY_PROP_POWER_NOW,
 	[BATT_POWER_AVG]	= POWER_SUPPLY_PROP_POWER_AVG,
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+	[BATT_TTF_NOW]		= POWER_SUPPLY_PROP_TIME_TO_FULL_NOW,
+#endif
 };
 
 static const int usb_prop_map[USB_PROP_MAX] = {
@@ -477,7 +559,7 @@ static int get_property_id(struct psy_state *pst,
 
 	return -ENOENT;
 }
-
+#if 0
 static void battery_chg_notify_disable(struct battery_chg_dev *bcdev)
 {
 	struct battery_charger_set_notify_msg req_msg = { { 0 } };
@@ -496,7 +578,7 @@ static void battery_chg_notify_disable(struct battery_chg_dev *bcdev)
 			bcdev->notify_en = false;
 	}
 }
-
+#endif
 static void battery_chg_notify_enable(struct battery_chg_dev *bcdev)
 {
 	struct battery_charger_set_notify_msg req_msg = { { 0 } };
@@ -616,7 +698,11 @@ static void handle_message(struct battery_chg_dev *bcdev, void *data,
 	struct wireless_fw_push_buf_resp *fw_resp_msg;
 	struct wireless_fw_update_status *fw_update_msg;
 	struct wireless_fw_get_version_resp *fw_ver_msg;
-	struct psy_state *pst;
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+	struct vdm_get_flg_resp *vdm_flag_msg;
+	struct battery_get_float_capacity_resp *float_capacity_msg;
+#endif
+    struct psy_state *pst;
 	bool ack_set = false;
 
 	switch (resp_msg->hdr.opcode) {
@@ -716,6 +802,40 @@ static void handle_message(struct battery_chg_dev *bcdev, void *data,
 				len);
 		}
 		break;
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+	case BC_NUBIA_SET_CHARGER:
+		ack_set = true;
+		printk(">>nubia>>>BC_NUBIA_SET_CHARGER\n");
+		break;
+	case BC_NUBIA_SET_CHARGER_LCD:
+		ack_set = true;
+		break;
+	case BC_NUBIA_SET_CHARGER_MODE:
+		ack_set = true;
+		printk(">>nubia>>>BC_NUBIA_SET_CHARGER\n");
+		break;
+	case BC_NUBIA_CHARGER_GET_VDM:
+		printk(">>nubia>>>length %zu for BC_NUBIA_CHARGER_GET_VDM\n",len);
+		if (len == sizeof(*vdm_flag_msg)) {
+			vdm_flag_msg = data;
+			bcdev->charger_vdm_flag = vdm_flag_msg->vdm_flag;
+			ack_set = true;
+		} else {
+			pr_err("Incorrect response length %zu for BC_NUBIA_CHARGER_GET_VDM\n",len);
+		}
+		break;
+	case BC_NUBIA_CHARGER_GET_FLOAT_CAPACITY:
+		printk(">>nubia>>>length %zu for BC_NUBIA_CHARGER_GET_FLOAT_CAPACITY\n", len);
+		if (len == sizeof(*float_capacity_msg)) {
+			float_capacity_msg = data;
+			bcdev->float_capacity = float_capacity_msg->float_capacity;
+			ack_set = true;
+			printk(">>nubia>>>length %d for BC_NUBIA_CHARGER_GET_FLOAT_CAPACITY\n", bcdev->float_capacity);
+		} else {
+			pr_err("Incorrect response length %zu for BC_NUBIA_CHARGER_GET_VDM\n",len);
+		}
+		break;
+#endif
 	default:
 		pr_err("Unknown opcode: %u\n", resp_msg->hdr.opcode);
 		break;
@@ -1030,8 +1150,8 @@ static int usb_psy_set_icl(struct battery_chg_dev *bcdev, u32 prop_id, int val)
 	temp = val;
 	if (val < 0)
 		temp = UINT_MAX;
-
-	rc = write_property_id(bcdev, pst, prop_id, temp);
+	//modify xiaoji shoubing not charge  icl bei set 0
+	//	rc = write_property_id(bcdev, pst, prop_id, temp);
 	if (rc < 0) {
 		pr_err("Failed to set ICL (%u uA) rc=%d\n", temp, rc);
 	} else {
@@ -1227,6 +1347,10 @@ static int battery_psy_get_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		pval->intval = DIV_ROUND_CLOSEST(pst->prop[prop_id], 100);
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+		bcdev->float_capacity = pst->prop[prop_id];
+		bcdev->two_batt_float_capacity = pst->prop[prop_id];
+#endif
 		if (IS_ENABLED(CONFIG_QTI_PMIC_GLINK_CLIENT_DEBUG) &&
 		   (bcdev->fake_soc >= 0 && bcdev->fake_soc <= 100))
 			pval->intval = bcdev->fake_soc;
@@ -1301,6 +1425,9 @@ static enum power_supply_property battery_props[] = {
 	POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG,
 	POWER_SUPPLY_PROP_POWER_NOW,
 	POWER_SUPPLY_PROP_POWER_AVG,
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+	POWER_SUPPLY_PROP_TIME_TO_FULL_NOW,
+#endif
 };
 
 static const struct power_supply_desc batt_psy_desc = {
@@ -1953,7 +2080,270 @@ static ssize_t ship_mode_en_show(struct class *c, struct class_attribute *attr,
 
 	return scnprintf(buf, PAGE_SIZE, "%d\n", bcdev->ship_mode_en);
 }
-static CLASS_ATTR_RW(ship_mode_en);
+//static CLASS_ATTR_RW(ship_mode_en);
+static struct class_attribute class_attr_ship_mode_en =
+                __ATTR(ship_mode_en, 0664, ship_mode_en_show, ship_mode_en_store);
+
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+
+static ssize_t float_capacity_store(struct class *c, struct class_attribute *attr,
+				const char *buf, size_t count)
+{
+	return count;
+}
+
+static ssize_t float_capacity_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	return scnprintf(buf, PAGE_SIZE, "%d\n", bcdev->two_batt_float_capacity);
+}
+static CLASS_ATTR_RW(float_capacity);
+
+static ssize_t charger_vdm_store(struct class *c, struct class_attribute *attr,
+				const char *buf, size_t count)
+{
+	return count;
+}
+
+static ssize_t charger_vdm_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct vdm_get_flg_rep vdm_req_msg = {0};
+	int rc;
+
+	vdm_req_msg.hdr.owner = MSG_OWNER_BC;
+	vdm_req_msg.hdr.type = MSG_TYPE_REQ_RESP;
+	vdm_req_msg.hdr.opcode = BC_NUBIA_CHARGER_GET_VDM;
+
+	rc = battery_chg_write(bcdev, &vdm_req_msg, sizeof(vdm_req_msg));
+	if (rc < 0) {
+		pr_err("Failed to get vdm flag rc=%d\n", rc);
+		return rc;
+	}
+    printk("charger_vdm_show:bcdev->charger_vdm_flag = %d\n", bcdev->charger_vdm_flag);
+
+    if(bcdev->charger_vdm_flag == 1)
+		return scnprintf(buf, PAGE_SIZE, "%s\n", "nubia_none");
+	else if(bcdev->charger_vdm_flag == 2)
+		return scnprintf(buf, PAGE_SIZE, "%s\n", "nubia_30w");
+	else if(bcdev->charger_vdm_flag == 3)
+		return scnprintf(buf, PAGE_SIZE, "%s\n", "nubia_65w");
+	else if(bcdev->charger_vdm_flag == 4)
+		return scnprintf(buf, PAGE_SIZE, "%s\n", "nubia_80w");
+	else if(bcdev->charger_vdm_flag == 5)
+		return scnprintf(buf, PAGE_SIZE, "%s\n", "nubia_120w");
+	else if(bcdev->charger_vdm_flag == 6)
+		return scnprintf(buf, PAGE_SIZE, "%s\n", "nubia_165w");
+	else
+		return scnprintf(buf, PAGE_SIZE, "%s\n", "disconnect");
+}
+static CLASS_ATTR_RW(charger_vdm);
+
+static ssize_t board_type_store(struct class *c, struct class_attribute *attr,
+				const char *buf, size_t count)
+{
+	return count;
+}
+
+static ssize_t board_type_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%s\n", nubia_charge_bcdev->board_type==1 ? "Inter" : "China");
+}
+static CLASS_ATTR_RW(board_type);
+
+#if 0
+static ssize_t charger_bypass_store(struct class *c, struct class_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct battery_charger_req_msg req_msg = { { 0 } };
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev, battery_class);
+	int rc = 0;
+	bool val;
+	if(kstrtobool(buf, &val))
+		return -EINVAL;
+	bcdev->bypass_charge = val;
+	req_msg.property_id = USB_MOISTURE_DET_EN;
+	req_msg.battery_id = 0;
+	req_msg.value = bcdev->bypass_charge;
+	req_msg.hdr.owner = MSG_OWNER_BC;
+	req_msg.hdr.type = MSG_TYPE_REQ_RESP;
+	req_msg.hdr.opcode = BC_NUBIA_SET_CHARGER;
+
+	rc = battery_chg_write(bcdev, &req_msg, sizeof(req_msg));
+	printk("charger_vdm_store mode: %d,  buf=%d rc=%d\n", bcdev->bypass_charge, buf, rc);
+	return count;
+}
+
+static ssize_t charger_bypass_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	return scnprintf(buf, PAGE_SIZE,  "%s\n", bcdev->bypass_charge==1 ? "on" : "off");
+}
+static CLASS_ATTR_RW(charger_bypass);
+#endif
+ssize_t nubia_set_lcd_status(int value)
+{
+	struct battery_charger_req_msg req_msg = { { 0 } };
+	int rc = 0;
+
+	if(nubia_charge_bcdev == NULL)
+		return -EINVAL;
+
+	printk("%s: value = %d", __func__, value);
+
+	req_msg.property_id = USB_MOISTURE_DET_EN;
+	req_msg.battery_id = 0;
+	req_msg.value = value;
+	req_msg.hdr.owner = MSG_OWNER_BC;
+	req_msg.hdr.type = MSG_TYPE_REQ_RESP;
+	req_msg.hdr.opcode = BC_NUBIA_SET_CHARGER;
+
+	rc = battery_chg_write(nubia_charge_bcdev, &req_msg, sizeof(req_msg));
+	printk("nubia_set_lcd_status mode: %d, rc=%d\n", value, rc);
+	return rc;
+}
+ssize_t nubia_set_charge_bypass(const char *buf)
+{
+	struct battery_charger_req_msg req_msg = { { 0 } };
+	int rc = 0;
+        bool val;
+	if(nubia_charge_bcdev == NULL)
+		return -EINVAL;
+
+	if(kstrtobool(buf, &val))
+		return -EINVAL;
+
+	nubia_charge_bcdev->bypass_charge = val;
+	req_msg.property_id = USB_MOISTURE_DET_EN;
+	req_msg.battery_id = 0;
+	req_msg.value = nubia_charge_bcdev->bypass_charge;
+	req_msg.hdr.owner = MSG_OWNER_BC;
+	req_msg.hdr.type = MSG_TYPE_REQ_RESP;
+	req_msg.hdr.opcode = BC_NUBIA_SET_CHARGER;
+
+	charge_bypass_flag = nubia_charge_bcdev->bypass_charge;
+	rc = battery_chg_write(nubia_charge_bcdev, &req_msg, sizeof(req_msg));
+	printk("nubia_set_charge_bypass mode: %d, buf=%d rc=%d\n", nubia_charge_bcdev->bypass_charge, buf, rc);
+	return rc;
+}
+
+ssize_t nubia_get_charge_bypass(char *buf)
+{
+	if(nubia_charge_bcdev == NULL)
+		return -EINVAL;
+
+    printk("nubia_get_charge_bypass bypass_charge=%d\n", nubia_charge_bcdev->bypass_charge);
+	return scnprintf(buf, PAGE_SIZE, "%s\n", nubia_charge_bcdev->bypass_charge==1 ? "on" : "off");
+}
+//powermode
+ssize_t nubia_set_chargermode(const char *buf)
+{
+	struct battery_charger_req_msg req_msg = { { 0 } };
+	int rc = 0;
+        bool val;
+	if(nubia_charge_bcdev == NULL)
+		return -EINVAL;
+
+	if(kstrtobool(buf, &val))
+		return -EINVAL;
+
+	nubia_charge_bcdev->charger_mode = val;
+	req_msg.property_id = USB_MOISTURE_DET_EN;
+	req_msg.battery_id = 0;
+	req_msg.value = nubia_charge_bcdev->charger_mode;
+	req_msg.hdr.owner = MSG_OWNER_BC;
+	req_msg.hdr.type = MSG_TYPE_REQ_RESP;
+	req_msg.hdr.opcode = BC_NUBIA_SET_CHARGER_MODE;
+
+	charge_mode_flag = nubia_charge_bcdev->charger_mode;
+	rc = battery_chg_write(nubia_charge_bcdev, &req_msg, sizeof(req_msg));
+	printk("nubia_set_chargermode mode: %d, buf=%d rc=%d\n", nubia_charge_bcdev->charger_mode, buf, rc);
+	return rc;
+}
+
+ssize_t nubia_get_chargermode(char *buf)
+{
+	if(nubia_charge_bcdev == NULL)
+		return -EINVAL;
+
+    printk("nubia_get_chargermode bypass_charge=%d\n", nubia_charge_bcdev->charger_mode);
+	return scnprintf(buf, PAGE_SIZE, "%s\n", nubia_charge_bcdev->charger_mode==1 ? "on" : "off");
+}
+
+
+static struct battery_chg_dev *bcdev_lcdstate = NULL;
+ssize_t nubia_set_charge_lcdstatus(const char *buf)
+{
+	struct psy_state *pst;
+        int rc;
+        pst = &bcdev_lcdstate->psy_list[PSY_TYPE_USB];
+        rc = read_property_id(bcdev_lcdstate, pst, USB_ONLINE);
+
+        if (rc < 0) {
+                pr_err("Failed to read prop nubia_set_charge_lcdstatus USB ONLINE, rc=%d\n", rc);
+                return rc;
+        }
+
+
+	if(nubia_charge_bcdev == NULL)
+		return -EINVAL;
+
+	if(kstrtobool(buf, &lcdstate_val)){
+		return -EINVAL;
+	}
+        pr_err("Failed to read prop nubia_set_charge_lcdstatus USB ONLINE lcdstate_val =%d\n", lcdstate_val);
+        pr_err("Failed to read prop nubia_set_charge_lcdstatus USB ONLINE  =%d\n", pst->prop[USB_ONLINE]);
+	if(lcdstate_val  || pst->prop[USB_ONLINE] == 1){
+		printk("queue_delayed_work flush soc");
+		//cancel_delayed_work_sync(&nubia_charge_bcdev->soc_flush_work);
+		queue_delayed_work(nubia_charge_bcdev->soc_flush_workqueue, &nubia_charge_bcdev->soc_flush_work, msecs_to_jiffies(5000));
+	}else{
+		printk("cancel_delayed_work_sync flush soc");
+		cancel_delayed_work_sync(&nubia_charge_bcdev->soc_flush_work);
+		//flush_workqueue(nubia_charge_bcdev->soc_flush_workqueue);
+	}
+	schedule_work(&bcdev_lcdstate->lcdstate_check_work);
+	return 0;
+}
+
+
+
+static void battery_chg_lcdstate_check_work(struct work_struct *work)
+{
+
+        struct battery_charger_req_msg req_msg = { { 0 } };
+        int rc = 0;
+
+        nubia_charge_bcdev->lcdstatus_charge = lcdstate_val;
+        req_msg.property_id = USB_MOISTURE_DET_EN;
+        req_msg.battery_id = 0;
+        req_msg.value = nubia_charge_bcdev->lcdstatus_charge;
+        req_msg.hdr.owner = MSG_OWNER_BC;
+        req_msg.hdr.type = MSG_TYPE_REQ_RESP;
+        req_msg.hdr.opcode = BC_NUBIA_SET_CHARGER_LCD;
+
+        //charge_bypass_flag = nubia_charge_bcdev->lcdstatus_charge;
+        rc = battery_chg_write(nubia_charge_bcdev, &req_msg, sizeof(req_msg));
+        printk("nubia_set_charge_lcdstatus mode======: %d, buf=%d rc=%d\n", nubia_charge_bcdev->lcdstatus_charge, lcdstate_val, rc);
+
+}
+
+ssize_t nubia_get_charge_lcdstatus(char *buf)
+{
+	if(nubia_charge_bcdev == NULL)
+		return -EINVAL;
+
+    printk("nubia_get_lcdstatus lcdstatus_charge=%d\n", nubia_charge_bcdev->lcdstatus_charge);
+	return scnprintf(buf, PAGE_SIZE, "%s\n", nubia_charge_bcdev->lcdstatus_charge==1 ? "1" : "0");
+}
+#endif
 
 static struct attribute *battery_class_attrs[] = {
 	&class_attr_soh.attr,
@@ -1973,6 +2363,15 @@ static struct attribute *battery_class_attrs[] = {
 	&class_attr_restrict_cur.attr,
 	&class_attr_usb_real_type.attr,
 	&class_attr_usb_typec_compliant.attr,
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+	/***add interface to distinguish 1S or 2S**/
+	&class_attr_float_capacity.attr,
+	&class_attr_charger_vdm.attr,
+	&class_attr_board_type.attr,
+#if 0
+	&class_attr_charger_bypass.attr,
+#endif
+#endif
 	NULL,
 };
 ATTRIBUTE_GROUPS(battery_class);
@@ -2088,8 +2487,158 @@ static int battery_chg_parse_dt(struct battery_chg_dev *bcdev)
 	bcdev->num_thermal_levels = len;
 	bcdev->thermal_fcc_ua = pst->prop[BATT_CHG_CTRL_LIM_MAX];
 
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+	bcdev->board_type_gpio = of_get_named_gpio(node, "qcom,board-type-gpio", 0);
+	pr_err("Failed to request GPIO:%d.yxc==========", bcdev->board_type_gpio);
+	if(!gpio_is_valid(bcdev->board_type_gpio)){
+		pr_err("paser board type gpio error \n");
+	}
+	rc = gpio_request(bcdev->board_type_gpio, "BOARD_TYPE");
+	if (rc < 0){
+		pr_err("Failed to request GPIO:%d, ERRNO:%d", bcdev->board_type_gpio, rc);
+		rc = -ENODEV;
+	}
+
+	bcdev->pinctrl = devm_pinctrl_get(bcdev->dev);
+	if (IS_ERR(bcdev->pinctrl)) {
+		if (PTR_ERR(bcdev->pinctrl) == -EPROBE_DEFER) {
+			pr_err("pinctrl not ready");
+			rc = -EPROBE_DEFER;
+		}
+		pr_err("Target does not use pinctrl");
+		bcdev->pinctrl  = NULL;
+		rc = -EINVAL;
+	}
+	bcdev->pinctrl_state = pinctrl_lookup_state(bcdev->pinctrl, "irq_charge");
+	if (IS_ERR(bcdev->pinctrl_state)) {
+		pr_err("cannot find pinctrl state");
+		rc = -ENODEV;
+	} else {
+		pinctrl_select_state(bcdev->pinctrl,bcdev->pinctrl_state);
+	}
+#endif
+
 	return 0;
 }
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+static int battery_fb_notifier_callback(struct notifier_block *self,
+		unsigned long event, void *data)
+{
+	int *transition;
+	struct fb_event *evdata = data;
+	struct battery_chg_dev *bcdev = container_of(self, struct battery_chg_dev, fb_notifier);
+	if ( evdata && evdata->data && bcdev ){
+		transition = evdata->data;
+		pr_err("====>>>>*transition = %d, event = %x<<<<====\n", *transition, event);
+		if ( (event == 0x01)||(event == 0x04)) {
+			if((*transition == 1)||(*transition == 8)){
+				bcdev->lcd_on = 0;
+				cancel_delayed_work_sync(&bcdev->soc_flush_work);
+				schedule_delayed_work(&bcdev->soc_flush_work, msecs_to_jiffies(3000));
+			}
+			else if((*transition == 0)||(*transition == 8)){
+				bcdev->lcd_on = 1;
+				cancel_delayed_work_sync(&bcdev->soc_flush_work);
+				schedule_delayed_work(&bcdev->soc_flush_work, msecs_to_jiffies(3000));
+			}else {
+				pr_err("====>>>>lcd do nothing.<<<<====\n");
+			}
+		}
+	}
+	pr_err("====>>>>lcd_on is %d<<<<====\n",bcdev->lcd_on);
+	return 0;
+}
+
+#ifdef CONFIG_NBLOG
+static int battery_chg_log(struct battery_chg_dev *bcdev)
+{
+	struct psy_state *pst;
+	int rc = 0;
+	pst = &bcdev->psy_list[PSY_TYPE_BATTERY];
+
+	rc = read_property_id(bcdev, pst, BATT_CAPACITY);
+	power_supply_nblog_info.battery_soc = (int)pst->prop[BATT_CAPACITY] / 100;
+
+	rc = read_property_id(bcdev, pst, BATT_CURR_NOW);
+	power_supply_nblog_info.charger_current = (int)pst->prop[BATT_CURR_NOW];
+
+	rc = read_property_id(bcdev, pst, BATT_CHG_FULL);
+	power_supply_nblog_info.full_charge = pst->prop[BATT_CHG_FULL];
+
+	rc = read_property_id(bcdev, pst, BATT_CHG_TYPE);
+	power_supply_nblog_info.charger_state = pst->prop[BATT_CHG_TYPE];
+
+	rc = read_property_id(bcdev, pst, BATT_HEALTH);
+	power_supply_nblog_info.battery_health = pst->prop[BATT_HEALTH];
+
+	rc = read_property_id(bcdev, pst, BATT_TEMP);
+	power_supply_nblog_info.battery_tempature = pst->prop[BATT_TEMP];
+
+	rc = read_property_id(bcdev, pst, BATT_VOLT_NOW);
+	power_supply_nblog_info.battery_voltage = pst->prop[BATT_VOLT_NOW];
+
+	rc = read_property_id(bcdev, pst, BATT_CYCLE_COUNT);
+	power_supply_nblog_info.battery_cycles_count = pst->prop[BATT_CYCLE_COUNT];
+
+	rc = read_property_id(bcdev, pst, BATT_CHG_COUNTER);
+	power_supply_nblog_info.battery_counter = pst->prop[BATT_CHG_COUNTER];
+
+	rc = read_property_id(bcdev, pst, BATT_CHG_FULL_DESIGN);
+	power_supply_nblog_info.battery_full_design = pst->prop[BATT_CHG_FULL_DESIGN];
+
+	rc = read_property_id(bcdev, pst, BATT_CHG_FULL);
+	power_supply_nblog_info.battery_full = pst->prop[BATT_CHG_FULL];
+
+	pst = &bcdev->psy_list[PSY_TYPE_USB];
+	rc = read_property_id(bcdev, pst, USB_ADAP_TYPE);
+	power_supply_nblog_info.charger_type = pst->prop[USB_ADAP_TYPE];
+
+	sprintf(power_noblog_buf, "%d, voltage=%d, temp=%d, health=%s, state=%s, current=%d, full_charge=%d, battery_cycles_count=%d, charge_type=%s,battery_counter=%d,battery_full_design = %d,battery_full = %d",
+			power_supply_nblog_info.battery_soc, power_supply_nblog_info.battery_voltage,
+		    power_supply_nblog_info.battery_tempature, POWER_SUPPLY_HEALTH_TEXT[power_supply_nblog_info.battery_health], POWER_SUPPLY_STATUS_TEXT[power_supply_nblog_info.charger_state],
+		    power_supply_nblog_info.charger_current, power_supply_nblog_info.full_charge, power_supply_nblog_info.battery_cycles_count, POWER_SUPPLY_USB_TYPE_TEXT[power_supply_nblog_info.charger_type],
+		    power_supply_nblog_info.battery_counter,power_supply_nblog_info.battery_full_design,power_supply_nblog_info.battery_full);
+	log_system_report_log(NUBIA_MODULE_CHARGE, "soc", power_noblog_buf, 0);
+/*
+	printk("soc=%d, voltage=%d, temp=%d, health=%s, state=%s, current=%d, full_charge=%d, charge_type=%s,battery_counter=%d,battery_full_design = %d,battery_full = %d",
+			power_supply_nblog_info.battery_soc, power_supply_nblog_info.battery_voltage,
+		    power_supply_nblog_info.battery_tempature, POWER_SUPPLY_HEALTH_TEXT[power_supply_nblog_info.battery_health], POWER_SUPPLY_STATUS_TEXT[power_supply_nblog_info.charger_state],
+		    power_supply_nblog_info.charger_current, power_supply_nblog_info.full_charge, POWER_SUPPLY_USB_TYPE_TEXT[power_supply_nblog_info.charger_type],
+		    power_supply_nblog_info.battery_counter,power_supply_nblog_info.battery_full_design,power_supply_nblog_info.battery_full);
+*/
+	return 0;
+}
+#endif /* CONFIG_NBLOG */
+
+/*
+* function: timerd task to flush battery info
+*/
+static void battery_soc_flush_work(struct work_struct *work)
+{
+	struct battery_chg_dev *bcdev = container_of(work, struct battery_chg_dev, soc_flush_work.work);
+	struct psy_state *pst;
+	int new_temp=0;
+	int new_soc =0;
+	static int old_soc = 0;
+	pst =  &bcdev->psy_list[PSY_TYPE_BATTERY];
+	read_property_id(bcdev, pst, BATT_CAPACITY);
+	new_soc = (int)pst->prop[BATT_CAPACITY] / 100;
+	new_temp=(int)pst->prop[BATT_TEMP] / 10 ;
+
+	if(old_soc != new_soc || (new_temp > 600)){
+		power_supply_changed(pst->psy);
+		pr_err("battery flush soc new_soc = %d, old_soc=%d,new_temp=%d", new_soc, old_soc,new_temp);
+		#ifdef CONFIG_NBLOG
+			/*to check fcc, when soc charge to 100%, the FCC is recovered*/
+			/*if((old_soc == 100) && (new_soc == 99))*/
+				battery_chg_log(bcdev);
+		#endif
+		old_soc = new_soc;
+	}
+	queue_delayed_work(bcdev->soc_flush_workqueue, &bcdev->soc_flush_work, msecs_to_jiffies(2000));
+}
+
+#endif
 
 static int battery_chg_ship_mode(struct notifier_block *nb, unsigned long code,
 		void *unused)
@@ -2125,6 +2674,88 @@ static int battery_chg_ship_mode(struct notifier_block *nb, unsigned long code,
 	return NOTIFY_DONE;
 }
 
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+static ssize_t nubia_charger_lcdstatus_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	nubia_set_charge_lcdstatus(buf);
+	return count;
+}
+
+static ssize_t nubia_charger_lcdstatus_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	size_t val;
+	val = nubia_get_charge_lcdstatus(buf);
+	return val;
+}
+
+static ssize_t nubia_charger_bypass_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	nubia_set_charge_bypass(buf);
+	return count;
+}
+
+static ssize_t nubia_charger_bypass_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	size_t val;
+	val = nubia_get_charge_bypass(buf);
+	return val;
+}
+static ssize_t nubia_chargermode_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	nubia_set_chargermode(buf);
+	return count;
+}
+
+static ssize_t nubia_chargermode_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	size_t val;
+	val = nubia_get_chargermode(buf);
+	return val;
+}
+
+static ssize_t nubia_board_type_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	return count;
+}
+
+static ssize_t nubia_board_type_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%s\n", nubia_charge_bcdev->board_type==1 ? "Inter" : "China");
+}
+
+static struct kobj_attribute nubia_battery_class_attrs[] = {
+	__ATTR(charger_bypass,	  0664, 	nubia_charger_bypass_show,	nubia_charger_bypass_store),
+	__ATTR(charger_mode,	  0664, 	nubia_chargermode_show,	nubia_chargermode_store),
+	__ATTR(charge_lcdstatus,	  0664, 	nubia_charger_lcdstatus_show,	nubia_charger_lcdstatus_store),
+	__ATTR(board_type,	  0664, 	nubia_board_type_show,	nubia_board_type_store),
+};
+
+static int nubia_charge_init(void)
+{
+	int retval = 0;
+	int attr_count = 0;
+	printk("%s: enter");
+	charge_kobj = kobject_create_and_add("nubia_charge", kernel_kobj);
+
+	if (!charge_kobj) {
+		return -ENOMEM;
+	}
+
+	for (attr_count = 0; attr_count < ARRAY_SIZE(nubia_battery_class_attrs); attr_count++) {
+		retval = sysfs_create_file(charge_kobj, &nubia_battery_class_attrs[attr_count].attr);
+		if (retval < 0) {
+			goto err_sys_creat;
+		}
+	}
+	return retval;
+	printk("%s: exit");
+err_sys_creat:
+	kobject_put(charge_kobj);
+	return retval;
+}
+#endif
+
+#if 0
 static void panel_event_notifier_callback(enum panel_event_notifier_tag tag,
 			struct panel_event_notification *notification, void *data)
 {
@@ -2197,7 +2828,7 @@ static int battery_chg_register_panel_notifier(struct battery_chg_dev *bcdev)
 	bcdev->notifier_cookie = cookie;
 	return 0;
 }
-
+#endif
 static int battery_chg_probe(struct platform_device *pdev)
 {
 	struct battery_chg_dev *bcdev;
@@ -2205,6 +2836,7 @@ static int battery_chg_probe(struct platform_device *pdev)
 	struct pmic_glink_client_data client_data = { };
 	int rc, i;
 
+	pr_err("enter battery_chg_probe yxc\n");
 	bcdev = devm_kzalloc(&pdev->dev, sizeof(*bcdev), GFP_KERNEL);
 	if (!bcdev)
 		return -ENOMEM;
@@ -2242,13 +2874,22 @@ static int battery_chg_probe(struct platform_device *pdev)
 	init_completion(&bcdev->fw_update_ack);
 	INIT_WORK(&bcdev->subsys_up_work, battery_chg_subsys_up_work);
 	INIT_WORK(&bcdev->usb_type_work, battery_chg_update_usb_type_work);
+
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+	INIT_WORK(&bcdev->lcdstate_check_work,battery_chg_lcdstate_check_work);
+	INIT_DELAYED_WORK(&bcdev->soc_flush_work, battery_soc_flush_work);
+	bcdev->soc_flush_workqueue = create_workqueue("soc_workqueue");
+#endif
 	INIT_WORK(&bcdev->battery_check_work, battery_chg_check_status_work);
 	bcdev->dev = dev;
-
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+    nubia_charge_bcdev = bcdev;
+#endif
+#if 0
 	rc = battery_chg_register_panel_notifier(bcdev);
 	if (rc < 0)
 		return rc;
-
+#endif
 	client_data.id = MSG_OWNER_BC;
 	client_data.name = "battery_charger";
 	client_data.msg_cb = battery_chg_callback;
@@ -2304,7 +2945,27 @@ static int battery_chg_probe(struct platform_device *pdev)
 	bcdev->notify_en = false;
 	battery_chg_notify_enable(bcdev);
 	device_init_wakeup(bcdev->dev, true);
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+
+	#ifdef CONFIG_NBLOG
+		power_noblog_buf = (char *)get_zeroed_page(GFP_KERNEL);
+		if (!power_noblog_buf){
+			pr_err("%s: get_zeroed_page for power_noblog_buf error \n", __func__);
+		}
+	#endif
+	gpio_direction_input(bcdev->board_type_gpio);
+	msleep(1);
+	bcdev->board_type = gpio_get_value(bcdev->board_type_gpio);
+	printk("############### board_type value = %s \n", bcdev->board_type ? "Inter" : "China");
+	nubia_charge_init();
+	bcdev->lcd_on = 1;
+	bcdev->fb_notifier.notifier_call = battery_fb_notifier_callback;
+	//msm_drm_panel_register_client(&bcdev->fb_notifier);
+	queue_delayed_work(bcdev->soc_flush_workqueue, &bcdev->soc_flush_work, msecs_to_jiffies(3000));
+#endif
 	schedule_work(&bcdev->usb_type_work);
+
+	bcdev_lcdstate = bcdev;
 
 	return 0;
 error:
@@ -2344,6 +3005,13 @@ static int battery_chg_remove(struct platform_device *pdev)
 	cancel_work_sync(&bcdev->subsys_up_work);
 	cancel_work_sync(&bcdev->usb_type_work);
 	cancel_work_sync(&bcdev->battery_check_work);
+#if IS_ENABLED(CONFIG_FEATURE_NUBIA_BATTERY_2S)
+	cancel_delayed_work_sync(&bcdev->soc_flush_work);
+	/*
+	if(bcdev->fb_notifier.notifier_call)
+		msm_drm_panel_unregister_client(&bcdev->fb_notifier);
+	*/
+#endif
 	unregister_reboot_notifier(&bcdev->reboot_notifier);
 
 	return 0;

@@ -1,0 +1,13 @@
+. ${ROOT_DIR}/msm-kernel/build.config.driveronly.nx729j
+
+function merge_nubia_diffconfig() {
+        if [[ "${VARIANT}" =~ ^(gki|consolidate)$ ]]; then
+                if [ "${VARIANT}" = gki ]; then
+                        apply_defconfig_fragment ${ROOT_DIR}/msm-kernel/arch/${ARCH}/configs/vendor/NX729J-perf_diff.config vendor/${MSM_ARCH}-NX729J-gki_defconfig
+                        return
+                fi
+                apply_defconfig_fragment ${ROOT_DIR}/msm-kernel/arch/${ARCH}/configs/vendor/NX729J_diff.config vendor/${MSM_ARCH}-NX729J-consolidate_defconfig
+        fi
+}
+
+merge_nubia_diffconfig

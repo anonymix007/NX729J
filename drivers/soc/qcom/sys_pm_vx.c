@@ -40,7 +40,10 @@
 #define VX_FLAG_SHIFT_FLUSH_THRESH	24
 
 #define MAX_MSG_LEN		255
-#define DEFAULT_DEBUG_TIME (10 * 1000)
+//nubia b
+//#define DEFAULT_DEBUG_TIME (10 * 1000)
+#define DEFAULT_DEBUG_TIME (30 * 1000)
+//nubia e
 
 #define read_word(base, itr) ({					\
 		u32 v;						\
@@ -275,7 +278,8 @@ static void vx_check_drv(struct vx_platform_data *pd)
 			if (log.data[j].drv_vx[i] == 0)
 				break;
 			if (j == log.loglines - 1)
-				pr_warn("DRV: %s has blocked power collapse\n", pd->drvs[i]);
+				pr_warn("[pmdb]:DRV: %s has blocked power collapse\n", pd->drvs[i]);
+
 		}
 	}
 
@@ -456,7 +460,10 @@ static int vx_probe(struct platform_device *pdev)
 
 	mutex_init(&pd->lock);
 	pd->detect_time_ms = DEFAULT_DEBUG_TIME;
-	pd->debug_enable = false;
+	//pd->debug_enable = false;
+	//nubia b
+	pd->debug_enable = true;
+	//nubia e
 	pd->monitor_enable = false;
 
 	platform_set_drvdata(pdev, pd);

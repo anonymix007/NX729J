@@ -13,6 +13,9 @@
 
 #include "core.h"
 
+/* David F. Huang @ nubia */
+#define USB_LPM_TEST
+
 /**
  * dwc3_gadget_ep_cmd_string - returns endpoint command string
  * @cmd: command code
